@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>리듬 벽돌깨기</title>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400..900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <script src="script.js" defer></script>
+</head>
+<body class="theme-default">
+
+    <div class="scanline-filter"></div>
+
+    <!-- 상단 컨트롤 패널: 시작 버튼 + 난이도/환경 설정 -->
+    <div class="top-panel">
+        <div class="control-panel">
+            <button id="btn-start">START</button>
+
+            <label>
+                난이도
+                <select id="sel-difficulty">
+                    <option value="easy">EASY</option>
+                    <option value="normal" selected>NORMAL</option>
+                    <option value="hard">HARD</option>
+                </select>
+            </label>
+
+            <label>
+                배경
+                <select id="sel-background">
+                    <option value="default" selected>DEFAULT</option>
+                    <option value="dark">DARK</option>
+                    <option value="neon">NEON</option>
+                </select>
+            </label>
+
+            <label>
+                공 스킨
+                <select id="sel-ball">
+                    <option value="cyan" selected>CYAN</option>
+                    <option value="white">WHITE</option>
+                </select>
+            </label>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="hp-guage-slot">
+            <div class="hp-gauge-fill"></div>
+        </div>
+        <div class="play-screen">
+            <canvas class="canvas" width="500" height="600"></canvas>
+            <div class="judgement-text"></div>
+        </div>
+        <div class="panel">
+            <div class="info-label">SCORE</div>
+            <div class="score-box">000000</div>
+            
+            <div class="info-label">STAGE</div>
+            <div class="stage-box">01</div>
+            
+            <div class="combo-box">0<span>COMBO</span></div>
+        </div>
+    </div>
+</body>
+</html>
