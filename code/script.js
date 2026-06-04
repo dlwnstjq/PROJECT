@@ -1,498 +1,769 @@
-// ========================
-// 기본 캔버스/컨텍스트
-// ========================
-let canvas, ctx;
+let canvas, context;
+let healthFill, healthSlot, playScreen, scoreBox, comboBox, judgementDisplay;
 
-// ========================
-// 전역: 객체 상태
-// ========================
-let ball;
-let paddle;
+// 실시간 게임 상태 변수
+let score = 0;
+let combo = 0;
+let hp = 100;
+
+// 정적 오브젝트 초기 상태 및 속도 설정
+let ball = {
+    x: 250, y: 480, radius: 8,
+    type: 'normal', tailLength: 0, specialLocked: false,
+    speedX: 0, speedY: 0, attached: true
+};
+let paddle = { x: 180, y: 520, width: 140, height: 12, isPressed: false };
+let effects = []; 
+
+// 판정선 및 입력 플래그
+const JUDGE_LINE_Y = 520;
+const PERFECT_WINDOW = 16;
+const GOOD_WINDOW = 32;
+
+const EFFECT_SPAWN_Y = 280;
+const NORMAL_MISS_HP = 20;
+const MASH_MISS_HP = 12;
+const MASH_MARKER_COUNT = 3;
+const TAIL_EXTRUDE_SPEED = 6;
+
+const BRICK_W = 52;
+const BRICK_H = 22;
+const BRICK_GAP = 6;
+const BRICK_ROW_Y = 100;
+
 let bricks = [];
-let effects = [];
 
-// 연타용 더미(허상 공)
-let dummyBalls = [];   // [{delay, x, y}...]
+function getTravelDir(vx, vy) {
+    let len = Math.hypot(vx, vy);
+    if (len < 0.01) return { x: 0, y: 1 };
+    return { x: vx / len, y: vy / len };
+}
 
-// 게임 상태
-let gameRunning = false;
-let ballLaunched = false;
+function getTailBackDir(vx, vy) {
+    let t = getTravelDir(vx, vy);
+    return { x: -t.x, y: -t.y };
+}
 
-// 입력 상태
+function tailBackPoint(headX, headY, backX, backY, length) {
+    return { x: headX + backX * length, y: headY + backY * length };
+}
+
+function syncTailGrowDirection() {
+    if (!tailGrow || ball.attached) return;
+    let back = getTailBackDir(ball.speedX, ball.speedY);
+    tailGrow.dirX = back.x;
+    tailGrow.dirY = back.y;
+}
+
 let keyLeft = false;
 let keyRight = false;
 let keyPaddleHeld = false;
 
-// ========================
-// 판정/물리 관련 기본 상수
-// ========================
-const JUDGE_LINE_Y = 520;
-const PERFECT_WINDOW = 16;
-const GOOD_WINDOW = 32;
-const EARLY_LATE_WINDOW = 48;
+// 최초 특수 브릭 1회만 반응, 패들 반사 후 해제
+let pendingSpecial = null;
+let tailGrow = null;
 
-let BALL_INIT_SPEED = 5;
-let ballSpeedX = 0;
-let ballSpeedY = 0;
+// 분리되어 패들로 흡수되는 롱/연타 꼬리
+let activeHoldTail = null;
+let activeMashTail = null;
 
-// ========================
-// 롱노트/연타 관련 상태
-// ========================
+document.addEventListener('DOMContentLoaded', () => {
+    canvas = document.querySelector('.canvas');
+    context = canvas.getContext('2d');
+    healthFill = document.querySelector(".hp-gauge-fill");
+    healthSlot = document.querySelector(".hp-guage-slot");
+    playScreen = document.querySelector(".play-screen");
+    scoreBox = document.querySelector(".score-box");
+    comboBox = document.querySelector(".combo-box");
+    judgementDisplay = document.querySelector(".judgement-text");
 
-// 롱노트 상태
-let holdActive = false;
-let activeLongNote = null; 
-// activeLongNote = { frames, targetFrames, initialJudgement }
+    initInputListeners();
+    uiUpdateHealth(hp);
+    uiUpdateScoreAndCombo(score, combo);
 
-// 공 궤적 기록 (롱노트 tail + 연타 허상 공 추적용)
-let ballPathQueue = []; // [{x,y}]
-let ballHistory = [];   // [{x,y}]
+    window.gameOnSpecialBrickHit = gameOnSpecialBrickHit;
 
-/* -------------------------------------------------
-   초기화: 테스트 환경용 기본 세팅
-   (팀 프로젝트에서는 DOMContentLoaded 안에서 호출)
-   ------------------------------------------------- */
-function initNoteTest(canvasId = 'noteCanvas') {
-    canvas = document.getElementById(canvasId);
-    if (!canvas) {
-        console.error('canvas not found');
-        return;
-    }
-    ctx = canvas.getContext('2d');
+    initTestBricks();
+    render();
+});
 
-    // 패들
-    paddle = {
-        x: (canvas.width - 140) / 2,
-        y: JUDGE_LINE_Y,
-        width: 140,
-        height: 12,
-        isPressed: false
-    };
+function initTestBricks() {
+    const types = ['normal', 'hold', 'mash', 'normal'];
+    const tailByType = { hold: 140, mash: 150 };
+    const count = types.length;
+    const totalW = count * BRICK_W + (count - 1) * BRICK_GAP;
+    let startX = (500 - totalW) / 2;
 
-    // 공
-    ball = {
-        x: paddle.x + paddle.width / 2,
-        y: paddle.y - 16,
-        radius: 8,
-        type: 'normal',     // 'normal' | 'hold' | 'mash'
-        isHidden: false
-    };
-
-    ballSpeedX = 0;
-    ballSpeedY = 0;
-    ballLaunched = false;
-
-    // 벽돌 (테스트용: normal, hold, mash 섞어서)
-    createTestBricks();
-
-    // 입력 바인딩
-    bindNoteInput();
-
-    gameRunning = true;
-    requestAnimationFrame(renderNoteTest);
+    bricks = types.map((type, i) => ({
+        x: startX + i * (BRICK_W + BRICK_GAP),
+        y: BRICK_ROW_Y,
+        w: BRICK_W,
+        h: BRICK_H,
+        type,
+        tailLength: tailByType[type] || 0,
+        alive: true
+    }));
 }
 
-// 테스트용 브릭 배치
-function createTestBricks() {
-    bricks = [];
-    const rows = 3;
-    const cols = 6;
-    const brickWidth = 60;
-    const brickHeight = 18;
-    const offsetX = 40;
-    const offsetY = 80;
-    const gap = 10;
-
-    let idCounter = 1;
-
-    for (let r = 0; r < rows; r++) {
-        for (let c = 0; c < cols; c++) {
-            let type = 'normal';
-            if (r === 0 && (c === 1 || c === 4)) type = 'hold';
-            if (r === 1 && (c === 0 || c === 5)) type = 'mash';
-
-            bricks.push({
-                id: idCounter++,
-                x: offsetX + c * (brickWidth + gap),
-                y: offsetY + r * (brickHeight + gap),
-                width: brickWidth,
-                height: brickHeight,
-                alive: true,
-                noteType: type
-            });
-        }
-    }
-}
-
-/* -------------------------------------------------
-   입력: 좌우 이동 + ArrowUp 발사/판정
-   ------------------------------------------------- */
-function bindNoteInput() {
+function initInputListeners() {
     window.addEventListener('keydown', (e) => {
-        if (!gameRunning) return;
         if (e.code === 'ArrowLeft') keyLeft = true;
         if (e.code === 'ArrowRight') keyRight = true;
-        if (e.code === 'ArrowUp') {
-            if (!ballLaunched) launchNoteBall();
-            handleNotePaddlePress();
+        
+        if (e.code === 'Space' || e.code === 'ArrowUp') {
+            keyPaddleHeld = true;
+            uiSetPaddleActive(true);
+            
+            if (ball.attached) {
+                launchBallFromPaddle();
+                return;
+            }
+
+            // 연타 노트 수동 타격 판정
+            if (tryMashMarkerHit()) return;
+
+            if (ball.speedY > 0 && Math.abs(ball.y - JUDGE_LINE_Y) <= GOOD_WINDOW) {
+                if (ball.x >= paddle.x && ball.x <= paddle.x + paddle.width) {
+                    if (ball.type === 'fake') return;
+
+                    let diff = Math.abs(ball.y - JUDGE_LINE_Y);
+                    let judge = diff <= PERFECT_WINDOW ? 'perfect' : 'good';
+
+                    if (ball.type === 'normal') {
+                        processJudgement(judge);
+                        uiHitParticle(ball.x, JUDGE_LINE_Y);
+                        bounceBall();
+                    } else if (ball.type === 'hold') {
+                        processJudgement(judge);
+                        uiHitParticle(ball.x, JUDGE_LINE_Y);
+                        startHoldTailFromBall();
+                        bounceBall();
+                    } else if (ball.type === 'mash') {
+                        processJudgement(judge);
+                        uiHitParticle(ball.x, JUDGE_LINE_Y);
+                        startMashTailFromBall();
+                        bounceBall();
+                    }
+                }
+            }
         }
     });
 
     window.addEventListener('keyup', (e) => {
-        if (!gameRunning) return;
         if (e.code === 'ArrowLeft') keyLeft = false;
         if (e.code === 'ArrowRight') keyRight = false;
-        if (e.code === 'ArrowUp') handleNotePaddleRelease();
+        if (e.code === 'Space' || e.code === 'ArrowUp') {
+            keyPaddleHeld = false;
+            uiSetPaddleActive(false);
+            tryHoldTailRelease();
+        }
     });
 }
 
-/* -------------------------------------------------
-   공 발사 / 패들 입력
-   ------------------------------------------------- */
-function launchNoteBall() {
-    if (ballLaunched) return;
-    ballLaunched = true;
-
-    let angle = -Math.PI / 4 - Math.random() * (Math.PI / 4);
-    ballSpeedX = BALL_INIT_SPEED * Math.cos(angle);
-    ballSpeedY = BALL_INIT_SPEED * Math.sin(angle);
+function isSpecialStateBusy() {
+    return ball.specialLocked || pendingSpecial || activeHoldTail || activeMashTail;
 }
 
-function handleNotePaddlePress() {
-    paddle.isPressed = true;
-    keyPaddleHeld = true;
-
-    if (!ballLaunched) return;
-    tryNoteBumperJudge();
+/** 다른 팀: 특수 브릭 충돌 시 호출. 이미 특수 상태면 무시 */
+function gameOnSpecialBrickHit(type, tailLength = 160) {
+    if (type !== 'hold' && type !== 'mash') return false;
+    if (isSpecialStateBusy()) return false;
+    pendingSpecial = { type, tailLength };
+    return true;
 }
 
-function handleNotePaddleRelease() {
-    paddle.isPressed = false;
-    keyPaddleHeld = false;
+function queueSpecialNote(type, tailLength) {
+    if (isSpecialStateBusy()) return;
+    pendingSpecial = { type, tailLength };
+}
 
-    // 롱노트 release 판정
-    if (activeLongNote) {
-        let diff = Math.abs(activeLongNote.frames - activeLongNote.targetFrames);
-        let result;
-        if (diff <= 15 && activeLongNote.initialJudgement === 'perfect') {
-            result = 'perfect';
-        } else if (diff <= 30) {
-            result = 'good';
-        } else {
-            result = 'miss';
-        }
+function activatePendingSpecial() {
+    if (!pendingSpecial || ball.y < EFFECT_SPAWN_Y) return;
 
-        console.log('Long note release:', result);
+    ball.type = pendingSpecial.type;
+    ball.tailLength = pendingSpecial.tailLength;
+    ball.specialLocked = true;
+    let back = getTailBackDir(ball.speedX, ball.speedY);
+    tailGrow = {
+        length: pendingSpecial.tailLength,
+        current: 0,
+        dirX: back.x,
+        dirY: back.y,
+        originX: ball.x,
+        originY: ball.y
+    };
+    pendingSpecial = null;
+}
 
-        // 롱노트 종료
-        ball.isHidden = false;
-        ball.type = 'normal';
-        activeLongNote = null;
-        holdActive = false;
+function getBallTailDisplayLength() {
+    if (tailGrow) return tailGrow.current;
+    if (ball.type === 'hold' || ball.type === 'mash') return ball.tailLength;
+    return 0;
+}
 
-        // 공 반사 (기본 반사)
-        reflectNoteBall();
+function updateTailGrow() {
+    if (!tailGrow || tailGrow.current >= tailGrow.length) return;
+    syncTailGrowDirection();
+    tailGrow.current = Math.min(tailGrow.length, tailGrow.current + TAIL_EXTRUDE_SPEED);
+}
+
+function captureTailMotion(vx, vy) {
+    let travel = getTravelDir(vx, vy);
+    let back = getTailBackDir(vx, vy);
+    let speed = Math.hypot(vx, vy) || 3;
+    return { moveX: travel.x, moveY: travel.y, backX: back.x, backY: back.y, speed };
+}
+
+function startHoldTailFromBall() {
+    let tailLen = getBallTailDisplayLength() || ball.tailLength;
+    let motion = captureTailMotion(ball.speedX, ball.speedY);
+    let far = tailBackPoint(ball.x, ball.y, motion.backX, motion.backY, tailLen);
+    activeHoldTail = {
+        nearX: ball.x,
+        nearY: ball.y,
+        farX: far.x,
+        farY: far.y,
+        moveX: motion.moveX,
+        moveY: motion.moveY,
+        backX: motion.backX,
+        backY: motion.backY,
+        speed: motion.speed,
+        missed: false,
+        released: false,
+        releaseWindow: false,
+        absorbing: false
+    };
+}
+
+function startMashTailFromBall() {
+    let tailLen = getBallTailDisplayLength() || ball.tailLength;
+    let motion = captureTailMotion(ball.speedX, ball.speedY);
+    let spacing = tailLen / MASH_MARKER_COUNT;
+    let markers = [];
+    for (let i = 1; i <= MASH_MARKER_COUNT; i++) {
+        let p = tailBackPoint(ball.x, ball.y, motion.backX, motion.backY, spacing * i);
+        markers.push({ x: p.x, y: p.y, state: 'pending' });
     }
+    activeMashTail = {
+        anchorX: ball.x,
+        anchorY: ball.y,
+        moveX: motion.moveX,
+        moveY: motion.moveY,
+        backX: motion.backX,
+        backY: motion.backY,
+        speed: motion.speed,
+        markers
+    };
 }
 
-/* -------------------------------------------------
-   메인 업데이트
-   ------------------------------------------------- */
-function updateNote(dt) {
-    if (!gameRunning) return;
+function getMashMarkerInWindow() {
+    if (!activeMashTail) return null;
 
-    // 패들 이동
-    const moveSpeed = 350;
-    if (keyLeft) paddle.x -= moveSpeed * dt;
-    if (keyRight) paddle.x += moveSpeed * dt;
+    let inWindow = activeMashTail.markers.filter(m => {
+        if (m.state !== 'pending') return false;
+        if (m.x < paddle.x || m.x > paddle.x + paddle.width) return false;
+        return Math.abs(m.y - JUDGE_LINE_Y) <= GOOD_WINDOW;
+    });
+    if (inWindow.length === 0) return null;
+
+    return inWindow.reduce((best, m) => (m.y > best.y ? m : best));
+}
+
+function tryMashMarkerHit() {
+    let targetMarker = getMashMarkerInWindow();
+    if (!targetMarker) return false;
+
+    let diff = Math.abs(targetMarker.y - JUDGE_LINE_Y);
+    let judge = diff <= PERFECT_WINDOW ? 'perfect' : 'good';
+    processJudgement(judge);
+    uiHitParticle(targetMarker.x, JUDGE_LINE_Y);
+    targetMarker.state = 'hit';
+    return true;
+}
+
+function tryHoldTailRelease() {
+    if (!activeHoldTail || activeHoldTail.missed || activeHoldTail.released) return;
+
+    if (!activeHoldTail.releaseWindow) {
+        processJudgement('miss');
+        activeHoldTail.missed = true;
+        return;
+    }
+
+    let diff = Math.abs(activeHoldTail.farY - JUDGE_LINE_Y);
+    let judge = diff <= PERFECT_WINDOW ? 'perfect' : diff <= GOOD_WINDOW ? 'good' : 'miss';
+    processJudgement(judge);
+    if (judge !== 'miss') uiHitParticle(activeHoldTail.farX, JUDGE_LINE_Y);
+    activeHoldTail.released = true;
+}
+
+function launchBallFromPaddle() {
+    ball.attached = false;
+    ball.x = paddle.x + paddle.width / 2;
+    ball.y = paddle.y - ball.radius - 2;
+    ball.speedX = 0;
+    ball.speedY = -5;
+}
+
+function bounceBall() {
+    ball.attached = false;
+    ball.speedY = -4;
+    let hitPoint = (ball.x - (paddle.x + paddle.width / 2)) / (paddle.width / 2);
+    ball.speedX = hitPoint * 4;
+    ball.type = 'normal';
+    ball.tailLength = 0;
+    ball.specialLocked = false;
+    tailGrow = null;
+}
+
+function processJudgement(type, options = {}) {
+    if (type === 'perfect') {
+        score += 100 + (combo * 10);
+        combo++;
+        hp = Math.min(100, hp + 2);
+    } else if (type === 'good') {
+        score += 50;
+        combo++;
+        hp = Math.min(100, hp + 1);
+    } else if (type === 'miss') {
+        combo = 0;
+        let dmg = options.light ? MASH_MISS_HP : NORMAL_MISS_HP;
+        hp = Math.max(0, hp - dmg);
+    }
+    uiUpdateScoreAndCombo(score, combo);
+    uiUpdateHealth(hp);
+    uiShowJudgement(type);
+}
+
+function updatePhysics() {
+    if (keyLeft) paddle.x -= 6;
+    if (keyRight) paddle.x += 6;
     if (paddle.x < 0) paddle.x = 0;
     if (paddle.x + paddle.width > canvas.width) paddle.x = canvas.width - paddle.width;
 
-    // 공 이동
-    if (!ballLaunched) {
+    activatePendingSpecial();
+    updateTailGrow();
+
+    // [버그 수정] 주석 처리: 연타 노트 자동 판정 루틴 제거 (수동 입력만 인정)
+    // if (keyPaddleHeld && activeMashTail) tryMashMarkerHit();
+
+    if (activeHoldTail) {
+        let step = activeHoldTail.speed;
+        if (!activeHoldTail.absorbing) {
+            activeHoldTail.nearX += activeHoldTail.moveX * step;
+            activeHoldTail.nearY += activeHoldTail.moveY * step;
+            activeHoldTail.farX += activeHoldTail.moveX * step;
+            activeHoldTail.farY += activeHoldTail.moveY * step;
+        } else {
+            activeHoldTail.farX += activeHoldTail.moveX * step;
+            activeHoldTail.farY += activeHoldTail.moveY * step;
+            if (activeHoldTail.nearY < JUDGE_LINE_Y) {
+                activeHoldTail.nearX += activeHoldTail.moveX * step;
+                activeHoldTail.nearY += activeHoldTail.moveY * step;
+            }
+        }
+
+        if (keyPaddleHeld && activeHoldTail.nearY >= JUDGE_LINE_Y - 4) {
+            activeHoldTail.absorbing = true;
+        }
+
+        if (!activeHoldTail.releaseWindow && activeHoldTail.farY >= JUDGE_LINE_Y - GOOD_WINDOW) {
+            activeHoldTail.releaseWindow = true;
+        }
+
+        if (!keyPaddleHeld && !activeHoldTail.releaseWindow && !activeHoldTail.missed && !activeHoldTail.released) {
+            processJudgement('miss');
+            activeHoldTail.missed = true;
+        }
+
+        if (activeHoldTail.releaseWindow && keyPaddleHeld &&
+            activeHoldTail.farY > JUDGE_LINE_Y + GOOD_WINDOW &&
+            !activeHoldTail.released && !activeHoldTail.missed) {
+            processJudgement('miss');
+            activeHoldTail.missed = true;
+        }
+
+        // [버그 수정] 흡수 완료(라인 통과) 시 꼬리가 더 밑으로 내려가지 않고 즉시 정리되도록 판정 조건 수정
+        if (activeHoldTail.farY > canvas.height + 50 ||
+            ((activeHoldTail.released || activeHoldTail.missed) && activeHoldTail.farY >= JUDGE_LINE_Y)) {
+            activeHoldTail = null;
+        }
+    }
+
+    if (activeMashTail) {
+        let isTailActive = false;
+        let step = activeMashTail.speed;
+
+        activeMashTail.markers.forEach(marker => {
+            if (marker.state === 'pending') {
+                marker.x += activeMashTail.moveX * step;
+                marker.y += activeMashTail.moveY * step;
+                isTailActive = true;
+
+                if (marker.y > JUDGE_LINE_Y + GOOD_WINDOW) {
+                    processJudgement('miss', { light: true });
+                    marker.state = 'missed';
+                }
+            } else if (marker.state === 'missed' || marker.state === 'hit') {
+                marker.x += activeMashTail.moveX * step;
+                marker.y += activeMashTail.moveY * step;
+                if (marker.y < canvas.height + ball.radius) isTailActive = true;
+            }
+        });
+
+        if (!isTailActive) activeMashTail = null;
+    }
+
+    if (ball.attached) {
         ball.x = paddle.x + paddle.width / 2;
-        ball.y = paddle.y - 16;
-    } else if (!ball.isHidden) {
-        ball.x += ballSpeedX;
-        ball.y += ballSpeedY;
-
-        // 벽 충돌
-        if (ball.x - ball.radius < 0) { ball.x = ball.radius; ballSpeedX *= -1; }
-        else if (ball.x + ball.radius > canvas.width) { ball.x = canvas.width - ball.radius; ballSpeedX *= -1; }
-        if (ball.y - ball.radius < 0) { ball.y = ball.radius; ballSpeedY *= -1; }
-
-        // 패들 물리 충돌 (판정 실패 시 최소한 튕겨나가기)
-        if (ballSpeedY > 0 &&
-            ball.y + ball.radius >= paddle.y - paddle.height / 2 &&
-            ball.y - ball.radius <= paddle.y + paddle.height / 2 &&
-            ball.x >= paddle.x &&
-            ball.x <= paddle.x + paddle.width) {
-
-            // hold 상태인데 holdActive가 아니면 miss로 처리 후 반사
-            if (ball.type === 'hold' && !holdActive) {
-                console.log('Long note miss by body collision');
-                ball.type = 'normal';
-            }
-            reflectNoteBall();
-        }
-
-        // pathQueue / history 갱신
-        ballPathQueue.push({ x: ball.x, y: ball.y });
-        if (ballPathQueue.length > 200) ballPathQueue.shift();
-
-        ballHistory.push({ x: ball.x, y: ball.y });
-        if (ballHistory.length > 15) ballHistory.shift();
-
-        // 브릭 충돌
-        updateNoteBrickCollision();
+        ball.y = paddle.y - ball.radius - 2;
+    } else {
+        ball.x += ball.speedX;
+        ball.y += ball.speedY;
     }
 
-    // 연타 dummy 공 추적
-    for (let i = dummyBalls.length - 1; i >= 0; i--) {
-        let d = dummyBalls[i];
-        let targetIdx = ballPathQueue.length - 1 - d.delay;
-        if (targetIdx >= 0 && targetIdx < ballPathQueue.length) {
-            d.x = ballPathQueue[targetIdx].x;
-            d.y = ballPathQueue[targetIdx].y;
-            if (d.y > canvas.height) {
-                console.log('Mash dummy miss (fell)');
-                dummyBalls.splice(i, 1);
-            }
-        }
-    }
+    if (!ball.attached && (ball.x - ball.radius < 0 || ball.x + ball.radius > canvas.width)) ball.speedX *= -1;
+    if (!ball.attached && ball.y - ball.radius < 0) ball.speedY *= -1;
 
-    // 공 바닥 miss
-    if (ballLaunched && ball.y - ball.radius > canvas.height && !ball.isHidden) {
-        console.log('Main ball miss (fell)');
-        ballLaunched = false;
-        ballSpeedX = 0;
-        ballSpeedY = 0;
+    if (!ball.attached) checkBallBrickCollisions();
+
+    if (!ball.attached && ball.y > canvas.height) {
+        processJudgement('miss');
+        ball.attached = true;
+        ball.speedX = 0;
+        ball.speedY = 0;
         ball.type = 'normal';
-        ballHistory = [];
-        ballPathQueue = [];
-        dummyBalls = [];
-        activeLongNote = null;
-    }
-
-    // 롱노트 유지 중
-    if (activeLongNote) {
-        activeLongNote.frames++;
-        // 너무 오래 누르고 있으면 자동 미스
-        if (activeLongNote.frames > activeLongNote.targetFrames + 30) {
-            console.log('Long note auto miss (too long)');
-            ball.isHidden = false;
-            ball.type = 'normal';
-            activeLongNote = null;
-            holdActive = false;
-            reflectNoteBall();
-        }
+        ball.tailLength = 0;
+        ball.specialLocked = false;
+        tailGrow = null;
+        pendingSpecial = null;
+        activeHoldTail = null;
+        activeMashTail = null;
     }
 }
 
-/* -------------------------------------------------
-   벽돌 충돌
-   ------------------------------------------------- */
-function updateNoteBrickCollision() {
-    for (let b of bricks) {
-        if (!b.alive) continue;
+// [버그 수정] 전방위(상하좌우) 벽돌 충돌 처리 알고리즘 적용
+function checkBallBrickCollisions() {
+    for (let brick of bricks) {
+        if (!brick.alive) continue;
+        
+        // 1. 기본 AABB 범위 바깥이면 스킵
+        if (ball.x + ball.radius < brick.x || ball.x - ball.radius > brick.x + brick.w) continue;
+        if (ball.y + ball.radius < brick.y || ball.y - ball.radius > brick.y + brick.h) continue;
 
-        if (ball.x + ball.radius > b.x &&
-            ball.x - ball.radius < b.x + b.width &&
-            ball.y + ball.radius > b.y &&
-            ball.y - ball.radius < b.y + b.height) {
+        // 2. 충돌 감지됨 -> 상하좌우 중 어느 면으로 가장 깊게 겹쳤는지 판별
+        brick.alive = false;
 
-            b.alive = false;
-            ballSpeedY *= -1;
+        let overlapLeft = (ball.x + ball.radius) - brick.x;
+        let overlapRight = (brick.x + brick.w) - (ball.x - ball.radius);
+        let overlapTop = (ball.y + ball.radius) - brick.y;
+        let overlapBottom = (brick.y + brick.h) - (ball.y - ball.radius);
 
-            // 노트 타입 부여
-            ball.type = b.noteType;
+        let minOverlap = Math.min(overlapLeft, overlapRight, overlapTop, overlapBottom);
 
-            if (b.noteType === 'mash') {
-                // 연타 허상 공 2개
-                dummyBalls.push({ delay: 15, x: ball.x, y: ball.y });
-                dummyBalls.push({ delay: 30, x: ball.x, y: ball.y });
-                console.log('Mash note spawned');
-            } else if (b.noteType === 'hold') {
-                console.log('Hold note spawned');
-            } else {
-                console.log('Normal note brick');
-            }
-
-            break;
+        if (minOverlap === overlapLeft) { // 벽돌 좌측 충돌 -> 왼쪽으로 튕김
+            ball.speedX = -Math.abs(ball.speedX);
+            ball.x = brick.x - ball.radius;
+        } else if (minOverlap === overlapRight) { // 벽돌 우측 충돌 -> 오른쪽으로 튕김
+            ball.speedX = Math.abs(ball.speedX);
+            ball.x = brick.x + brick.w + ball.radius;
+        } else if (minOverlap === overlapTop) { // 벽돌 상단 충돌 -> 위쪽으로 튕김
+            ball.speedY = -Math.abs(ball.speedY);
+            ball.y = brick.y - ball.radius;
+        } else if (minOverlap === overlapBottom) { // 벽돌 하단 충돌 -> 아래쪽으로 튕김
+            ball.speedY = Math.abs(ball.speedY);
+            ball.y = brick.y + brick.h + ball.radius;
         }
+
+        // 3. 리듬 액션 연계 특수 브릭 활성화
+        if (brick.type === 'hold' || brick.type === 'mash') {
+            gameOnSpecialBrickHit(brick.type, brick.tailLength);
+        }
+        return; // 한 프레임에 벽돌 1개만 처리
     }
 }
 
-/* -------------------------------------------------
-   판정 시스템 (ArrowUp 누를 때)
-   ------------------------------------------------- */
-function tryNoteBumperJudge() {
-    const checkHit = (targetY) => {
-        const dy = targetY - JUDGE_LINE_Y;
-        const absDy = Math.abs(dy);
-        if (absDy > EARLY_LATE_WINDOW) return null;
-        if (absDy <= PERFECT_WINDOW) return 'perfect';
-        if (absDy <= GOOD_WINDOW) return 'good';
-        return 'late';
-    };
+/* ========== API 목록 ========== */
+function uiUpdateHealth(hpValue) {
+    hp = hpValue;
+    if (!healthFill) return;
+    healthFill.style.height = hp + "%";
 
-    // 1. 연타 dummy 공 판정
-    for (let i = dummyBalls.length - 1; i >= 0; i--) {
-        let d = dummyBalls[i];
-        let judge = checkHit(d.y);
-        if (judge) {
-            console.log('Mash dummy hit:', judge);
-            dummyBalls.splice(i, 1);
-            return; // 한 번 입력에 하나만 처리
-        }
-    }
-
-    // 2. 메인 공 판정
-    if (!ball.isHidden && ballSpeedY > 0) {
-        let judge = checkHit(ball.y);
-        if (judge) {
-            if (ball.type === 'hold') {
-                // 롱노트 시작
-                activeLongNote = {
-                    frames: 0,
-                    targetFrames: 60,
-                    initialJudgement: judge
-                };
-                holdActive = true;
-                console.log('Long note start:', judge);
-                reflectNoteBall();
-            } else {
-                console.log('Normal/mash main hit:', judge);
-                reflectNoteBall();
-            }
-        }
+    if (hp <= 30) {
+        healthFill.style.background = "linear-gradient(#ff0055 0%, #ff0000 100%)"; 
+        healthFill.style.boxShadow = "0 0 25px #ff0055, inset 0 0 10px #ffffff";
+        healthSlot.style.borderColor = "#ff0055"; 
+        playScreen.style.borderColor = "#ff0055"; 
+        playScreen.style.boxShadow = "inset 0 0 60px rgba(255, 0, 85, 0.25)";
+    } else {
+        healthFill.style.background = "linear-gradient(#00ffff 0%, #0088ff 100%)"; 
+        healthFill.style.boxShadow = "0 0 20px #00ffff, inset 0 0 10px #ffffff";
+        healthSlot.style.borderColor = "#00ffff"; 
+        playScreen.style.borderColor = "#00ffff"; 
+        playScreen.style.boxShadow = "inset 0 0 40px rgba(0, 255, 255, 0.15)";
     }
 }
 
-/* -------------------------------------------------
-   공 반사
-   ------------------------------------------------- */
-function reflectNoteBall() {
-    const speed = Math.sqrt(ballSpeedX * ballSpeedX + ballSpeedY * ballSpeedY) || BALL_INIT_SPEED;
-    let hitPoint = (ball.x - paddle.x) / (paddle.width / 2);
-    hitPoint = Math.max(-0.85, Math.min(0.85, hitPoint)); 
-    let angle = hitPoint * (Math.PI / 2.5) - Math.PI / 2; 
+function uiUpdateScoreAndCombo(scoreValue, comboValue) {
+    score = scoreValue;
+    combo = comboValue;
+    let scoreStr = score.toString();
+    while (scoreStr.length < 6) scoreStr = "0" + scoreStr;
+    scoreBox.textContent = scoreStr;
     
-    ballSpeedX = Math.cos(angle) * speed;
-    ballSpeedY = Math.sin(angle) * speed;
-}
-
-/* -------------------------------------------------
-   렌더링
-   ------------------------------------------------- */
-function drawNoteBricks() {
-    bricks.forEach(b => {
-        if (!b.alive) return;
-        ctx.fillStyle = b.noteType === 'normal'
-            ? '#00aaaa'
-            : b.noteType === 'hold'
-            ? '#ffaa00'
-            : '#ff00ff';
-        ctx.fillRect(b.x, b.y, b.width, b.height);
-    });
-}
-
-function drawNotePaddle() {
-    // PERFECT 범위 박스
-    ctx.fillStyle = 'rgba(0, 255, 255, 0.08)';
-    ctx.fillRect(0, JUDGE_LINE_Y - PERFECT_WINDOW, canvas.width, PERFECT_WINDOW * 2);
-
-    // 판정선
-    ctx.beginPath();
-    ctx.moveTo(0, paddle.y);
-    ctx.lineTo(canvas.width, paddle.y);
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = 'rgba(0, 255, 255, 0.7)';
-    ctx.stroke();
-
-    // 패들 본체
-    ctx.fillStyle = paddle.isPressed ? '#ffffff' : '#000000';
-    ctx.fillRect(paddle.x, paddle.y - (paddle.height / 2), paddle.width, paddle.height);
-    ctx.strokeStyle = paddle.isPressed ? '#00ffff' : '#ffffff';
-    ctx.strokeRect(paddle.x, paddle.y - (paddle.height / 2), paddle.width, paddle.height);
-
-    // 롱노트 링 이펙트
-    if (activeLongNote) {
-        let ratio = activeLongNote.frames / activeLongNote.targetFrames;
-        ctx.beginPath();
-        ctx.arc(paddle.x + paddle.width / 2, paddle.y, 15 + (ratio * 30), 0, Math.PI * 2);
-        ctx.strokeStyle = (ratio > 0.85 && ratio < 1.15) ? '#00ffff' : '#ffaa00';
-        ctx.lineWidth = 4;
-        ctx.stroke();
+    if (combo > 0) {
+        animCombo();
+        comboBox.innerHTML = combo + "<span>COMBO</span>"; 
+        comboBox.style.opacity = "1"; 
+    } else { 
+        comboBox.style.opacity = "0"; 
     }
 }
 
-function drawNoteBallAndTails() {
-    // 연타 dummy
-    dummyBalls.forEach(d => {
-        ctx.beginPath();
-        ctx.arc(d.x, d.y, ball.radius, 0, Math.PI * 2);
-        ctx.fillStyle = '#ff00ff';
-        ctx.fill();
-    });
+function uiShowJudgement(judgeType) {
+    if (judgeType == 'miss') {
+        animDamage();
+        animJudge("MISS", "miss");
+    } else if (judgeType == 'perfect') {
+        animJudge("PERFECT", "perfect");
+    } else if (judgeType == 'good') {
+        animJudge("GOOD", "good");
+    } else {
+        animJudge(judgeType, "perfect");
+    }
+}
 
-    // 메인 공 tail
-    if (!ball.isHidden && ballHistory.length > 0) {
-        ctx.beginPath();
-        ctx.moveTo(ballHistory[0].x, ballHistory[0].y);
-        for (let i = 1; i < ballHistory.length; i++) {
-            ctx.lineTo(ballHistory[i].x, ballHistory[i].y);
+function uiHitParticle(x, y) {
+    effects.push({ x: x, y: y, radius: 10, alpha: 1 });
+}
+
+function uiSetNoteState(type, tailLength = 0) {
+    ball.attached = true;
+    ball.speedX = 0;
+    ball.speedY = 0;
+    activeHoldTail = null;
+    activeMashTail = null;
+    pendingSpecial = null;
+    tailGrow = null;
+    ball.specialLocked = false;
+
+    if (type === 'hold' || type === 'mash') {
+        ball.type = 'normal';
+        ball.tailLength = 0;
+        queueSpecialNote(type, tailLength);
+    } else {
+        ball.type = type;
+        ball.tailLength = tailLength;
+    }
+}
+
+function uiSetPaddleActive(isActive) {
+    paddle.isPressed = isActive;
+}
+
+/* ========== 내부 애니메이션 루틴 ========== */
+let judgeTimer = null; 
+function animJudge(text, judgeType) {
+    judgementDisplay.textContent = text;
+    judgementDisplay.classList.remove('judge-perfect', 'judge-good', 'judge-miss');
+    judgementDisplay.classList.add(`judge-${judgeType}`);
+    
+    let frame = 0; const maxFrame = 25; 
+    if (judgeTimer) clearInterval(judgeTimer);
+    
+    const targetSize = 55; 
+    judgeTimer = setInterval(() => {
+        frame++;
+        if (frame <= 5) {
+            let progress = frame / 5; 
+            let startSize = targetSize + 12;
+            judgementDisplay.style.opacity = 1; 
+            judgementDisplay.style.top = "35%"; 
+            judgementDisplay.style.fontSize = (startSize - (12 * progress)) + "px"; 
+        } else if (frame <= maxFrame) {
+            let progress = (frame - 5) / 20; 
+            judgementDisplay.style.opacity = 1.0 - progress; 
+            judgementDisplay.style.top = (35 - (5 * progress)) + "%"; 
+            judgementDisplay.style.fontSize = (targetSize - (4 * progress)) + "px"; 
+        } else {
+            clearInterval(judgeTimer);
         }
-        ctx.lineWidth = ball.radius * 1.5;
-        ctx.lineCap = 'round';
-
-        if (ball.type === 'hold') ctx.strokeStyle = 'rgba(255, 170, 0, 0.5)';
-        else if (ball.type === 'mash') ctx.strokeStyle = 'rgba(255, 0, 255, 0.5)';
-        else ctx.strokeStyle = 'rgba(0, 255, 255, 0.4)';
-
-        ctx.stroke();
-    }
-
-    // 메인 공 본체
-    if (!ball.isHidden) {
-        let mainBallColor = '#00ffff';
-        if (ball.type === 'hold') mainBallColor = '#ffaa00';
-        else if (ball.type === 'mash') mainBallColor = '#ff00ff';
-
-        ctx.beginPath();
-        ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
-        ctx.fillStyle = mainBallColor;
-        ctx.fill();
-    }
+    }, 16);
 }
 
-function drawNoteEffects() {
-    effects = effects.filter(ef => { ef.radius += 2; ef.alpha -= 0.05; return ef.alpha > 0; });
-    effects.forEach(ef => {
-        ctx.beginPath();
-        ctx.arc(ef.x, ef.y, ef.radius, 0, Math.PI * 2);
-        ctx.lineWidth = 2;
-        ctx.strokeStyle = `rgba(255, 255, 255, ${ef.alpha})`;
-        ctx.stroke();
+let comboTimer = null;
+function animCombo() {
+    const targetSize = 45;
+    let currentSize = targetSize + 12;
+    comboBox.style.color = "#ffffff";
+    if (comboTimer) clearInterval(comboTimer);
+    
+    comboTimer = setInterval(() => {
+        currentSize -= 2;
+        if (currentSize <= targetSize) { 
+            currentSize = targetSize;
+            comboBox.style.color = "#ff00ff";
+            clearInterval(comboTimer);
+        }
+        comboBox.style.fontSize = currentSize + "px";
+    }, 16);
+}
+
+let damageTimer = null;
+function animDamage() {
+    if (damageTimer) clearTimeout(damageTimer);
+    healthFill.style.background = "#ffffff";
+    healthFill.style.boxShadow = "0 0 40px #ffffff, inset 0 0 20px #ffffff";
+    damageTimer = setTimeout(() => { uiUpdateHealth(hp); }, 100);
+}
+
+/* ========== 렌더 루프 ========== */
+function drawBricks() {
+    bricks.forEach(brick => {
+        if (!brick.alive) return;
+        context.fillStyle = '#1a1a22';
+        context.fillRect(brick.x, brick.y, brick.w, brick.h);
+        let color = brick.type === 'hold' ? '#ffff00' : brick.type === 'mash' ? '#ff00ff' : '#00ffff';
+        context.strokeStyle = color;
+        context.lineWidth = 2;
+        context.strokeRect(brick.x, brick.y, brick.w, brick.h);
+        if (brick.type === 'hold' || brick.type === 'mash') {
+            context.fillStyle = color;
+            context.font = '9px Orbitron';
+            context.fillText(brick.type === 'hold' ? 'L' : 'M', brick.x + brick.w / 2 - 4, brick.y + 15);
+        }
     });
 }
 
-/* -------------------------------------------------
-   렌더 루프
-   ------------------------------------------------- */
-let prevNoteTime = performance.now();
-function renderNoteTest(now) {
-    if (!now) now = performance.now();
-    const dt = (now - prevNoteTime) / 1000;
-    prevNoteTime = now;
+function drawExtrudeTail(headX, headY, length, dirX, dirY, color) {
+    if (length <= 0) return;
+    let end = tailBackPoint(headX, headY, dirX, dirY, length);
+    context.beginPath();
+    context.moveTo(end.x, end.y);
+    context.lineTo(headX, headY);
+    context.lineWidth = ball.radius * 2;
+    context.lineCap = 'round';
+    context.strokeStyle = color;
+    context.stroke();
+}
 
-    if (gameRunning) updateNote(dt);
+function getBallTailDir() {
+    if (tailGrow) return { x: tailGrow.dirX, y: tailGrow.dirY };
+    return getTailBackDir(ball.speedX, ball.speedY);
+}
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    drawNoteBricks();
-    drawNotePaddle();
-    drawNoteBallAndTails();
-    drawNoteEffects();
+function render() {
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    updatePhysics();
+    drawBricks();
+    drawPaddle();
 
-    requestAnimationFrame(renderNoteTest);
+    if (activeHoldTail) {
+        let nx = activeHoldTail.nearX;
+        let ny = activeHoldTail.nearY;
+        if (activeHoldTail.absorbing) {
+            ny = JUDGE_LINE_Y;
+        }
+        
+        // [버그 수정] 그릴 때 꼬리 끝(farY)이 판정선 밑으로 흘러넘치지 않도록 제한(Clamping)
+        let fx = activeHoldTail.farX;
+        let fy = Math.min(activeHoldTail.farY, JUDGE_LINE_Y);
+
+        context.beginPath();
+        context.moveTo(fx, fy);
+        context.lineTo(nx, ny);
+        context.lineWidth = ball.radius * 2;
+        context.lineCap = 'round';
+        context.strokeStyle = '#ffff00';
+        context.stroke();
+        if (activeHoldTail.absorbing && paddle.isPressed) {
+            context.fillStyle = 'rgba(255, 255, 0, 0.15)';
+            context.fillRect(paddle.x, paddle.y - paddle.height, paddle.width, paddle.height);
+        }
+    }
+
+    if (activeMashTail) {
+        let pendingMarkers = activeMashTail.markers.filter(m => m.state === 'pending');
+        if (pendingMarkers.length > 0) {
+            let far = pendingMarkers[pendingMarkers.length - 1];
+            let near = pendingMarkers[0];
+            let lead = tailBackPoint(far.x, far.y, activeMashTail.backX, activeMashTail.backY, 10);
+            context.beginPath();
+            context.moveTo(lead.x, lead.y);
+            context.lineTo(near.x, near.y);
+            context.lineWidth = ball.radius * 2;
+            context.lineCap = 'round';
+            context.strokeStyle = '#ff00ff';
+            context.stroke();
+        }
+
+        activeMashTail.markers.forEach(marker => {
+            if (marker.state === 'pending') {
+                context.beginPath();
+                context.arc(marker.x, marker.y, ball.radius, 0, Math.PI * 2);
+                context.fillStyle = '#ffffff';
+                context.fill();
+            } else if (marker.state === 'missed') {
+                context.beginPath();
+                context.arc(marker.x, marker.y, ball.radius, 0, Math.PI * 2);
+                context.fillStyle = '#444444';
+                context.strokeStyle = '#ff00ff';
+                context.lineWidth = 1;
+                context.fill();
+                context.stroke();
+            }
+        });
+    }
+
+    if (ball.type === 'hold' || ball.type === 'mash') {
+        let displayLen = getBallTailDisplayLength();
+        let dir = getBallTailDir();
+        let color = ball.type === 'hold' ? '#ffff00' : '#ff00ff';
+        drawExtrudeTail(ball.x, ball.y, displayLen, dir.x, dir.y, color);
+    }
+
+    context.beginPath();
+    context.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+    context.fillStyle = ball.type === 'hold' ? '#ffff00' : ball.type === 'mash' ? '#ff00ff' : ball.type === 'fake' ? '#b026ff' : '#00ffff';
+    context.fill();
+
+    if (ball.type === 'fake') {
+        context.lineWidth = 2;
+        context.strokeStyle = '#ffffff';
+        context.stroke();
+    }
+
+    effects = effects.filter(ef => {
+        ef.radius += 5; ef.alpha -= 0.08;
+        context.beginPath();
+        context.arc(ef.x, ef.y, ef.radius, 0, Math.PI * 2);
+        context.lineWidth = 2; context.strokeStyle = `rgba(255, 255, 255, ${ef.alpha})`; context.stroke();
+        return ef.alpha > 0;
+    });
+
+    requestAnimationFrame(render);
+}
+
+function drawPaddle() {
+    context.beginPath(); 
+    context.moveTo(0, paddle.y); 
+    context.lineTo(canvas.width, paddle.y);
+    context.lineWidth = 1; 
+    context.strokeStyle = 'rgba(0, 255, 255, 0.4)'; 
+    context.stroke();
+    
+    if (paddle.isPressed) { 
+        let gradient = context.createLinearGradient(paddle.x, 0, paddle.x + paddle.width, 0);
+        gradient.addColorStop(0, 'rgba(255, 255, 255, 0.2)'); 
+        gradient.addColorStop(0.5, 'rgba(255, 255, 255, 0)');
+        gradient.addColorStop(1, 'rgba(255, 255, 255, 0.2)'); 
+        context.fillStyle = gradient;
+        context.fillRect(paddle.x, 0, paddle.width, paddle.y); 
+    }
+
+    context.fillStyle = paddle.isPressed ? '#ffffff' : '#000000'; 
+    context.fillRect(paddle.x, paddle.y - (paddle.height / 2), paddle.width, paddle.height);
+    context.lineWidth = 2; 
+    context.strokeStyle = paddle.isPressed ? '#00ffff' : '#ffffff'; 
+    context.strokeRect(paddle.x, paddle.y - (paddle.height / 2), paddle.width, paddle.height);
 }
