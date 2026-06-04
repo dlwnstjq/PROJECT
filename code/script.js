@@ -80,7 +80,7 @@ let uiSetPaddleActive, tryHoldTailRelease, isSpecialStateBusy, queueSpecialNote;
 let activatePendingSpecial, getBallTailDisplayLength, updateTailGrow, captureTailMotion;
 let getMashMarkerInWindow, updatePhysics, checkBallBrickCollisions, uiShowJudgement;
 let uiSetNoteState, animJudge, animCombo, animDamage, drawBricks, drawExtrudeTail;
-let getBallTailDir, drawPaddle;
+let getBallTailDir, drawPaddle, dropHeldBall;
 
 document.addEventListener('DOMContentLoaded', () => {
     canvas = document.querySelector('.canvas');
@@ -136,10 +136,8 @@ initInputListeners = () => {
                 return;
             }
 
-            // 연타 노트 수동 타격 판정
             if (tryMashMarkerHit()) return;
 
-            // EARLY 꼼수 방지
             if (ball.speedY > 0 && !ball.heldOnPaddle && !ball.earlyMissed) {
                 let dist = JUDGE_LINE_Y - ball.y;
                 if (dist > GOOD_WINDOW && dist <= 200) {
@@ -149,7 +147,6 @@ initInputListeners = () => {
                 }
             }
 
-            // 본체 공 판정
             if (ball.speedY > 0 && Math.abs(ball.y - JUDGE_LINE_Y) <= GOOD_WINDOW && !ball.earlyMissed) {
                 if (ball.x >= paddle.x && ball.x <= paddle.x + paddle.width) {
                     if (ball.type === 'fake') return;
@@ -231,9 +228,7 @@ activatePendingSpecial = () => {
 };
 
 getBallTailDisplayLength = () => {
-    // [버그 수정] 대가리가 패들에 홀드되어 있으면 본체의 가짜 고정 꼬리 이미지를 숨깁니다.
     if (ball.heldOnPaddle) return 0; 
-    
     if (tailGrow) return tailGrow.current;
     if (ball.type === 'hold' || ball.type === 'mash') return ball.tailLength;
     return 0;
@@ -302,16 +297,25 @@ tryMashMarkerHit = () => {
     return true;
 };
 
+// [추가] 꼬리 투하 시 본체 공의 꼬리 속성을 완전히 파괴하고 일반 공으로 리셋하는 헬퍼 함수
+dropHeldBall = () => {
+    if (ball.heldOnPaddle) {
+        ball.heldOnPaddle = false;
+        ball.speedY = 3;
+        ball.type = 'normal'; // 더 이상 꼬리를 그리지 않음
+        ball.tailLength = 0;
+        tailGrow = null;
+    }
+};
+
 tryHoldTailRelease = () => {
     if (!activeHoldTail || activeHoldTail.missed || activeHoldTail.released) return;
 
     if (!activeHoldTail.releaseWindow) {
         processJudgement('miss');
-        activeHoldTail.missed = true;
-        if (ball.heldOnPaddle) {
-            ball.heldOnPaddle = false;
-            ball.speedY = 3;
-        }
+        ball.earlyMissed = true; 
+        dropHeldBall(); // 투하 시 꼬리 완전 파괴
+        activeHoldTail = null; 
         return;
     }
 
@@ -323,12 +327,10 @@ tryHoldTailRelease = () => {
         uiHitParticle(activeHoldTail.farX, JUDGE_LINE_Y);
         if (ball.heldOnPaddle) bounceBall();
     } else {
-        if (ball.heldOnPaddle) {
-            ball.heldOnPaddle = false;
-            ball.speedY = 3;
-        }
+        ball.earlyMissed = true; 
+        dropHeldBall(); // 투하 시 꼬리 완전 파괴
     }
-    activeHoldTail.released = true;
+    activeHoldTail = null; 
 };
 
 launchBallFromPaddle = () => {
@@ -382,7 +384,6 @@ updatePhysics = () => {
     activatePendingSpecial();
     updateTailGrow();
 
-    // 롱노트 물리 및 유지 검사
     if (activeHoldTail) {
         let step = activeHoldTail.speed;
         if (!activeHoldTail.absorbing) {
@@ -409,25 +410,28 @@ updatePhysics = () => {
 
         if (!keyPaddleHeld && !activeHoldTail.releaseWindow && !activeHoldTail.missed && !activeHoldTail.released) {
             processJudgement('miss');
-            activeHoldTail.missed = true;
-            if (ball.heldOnPaddle) { ball.heldOnPaddle = false; ball.speedY = 3; }
+            ball.earlyMissed = true; 
+            dropHeldBall(); // 투하 시 꼬리 완전 파괴
+            activeHoldTail = null; 
         }
 
-        if (activeHoldTail.releaseWindow && keyPaddleHeld &&
+        if (activeHoldTail && activeHoldTail.releaseWindow && keyPaddleHeld &&
             activeHoldTail.farY > JUDGE_LINE_Y + GOOD_WINDOW &&
             !activeHoldTail.released && !activeHoldTail.missed) {
             processJudgement('miss');
-            activeHoldTail.missed = true;
-            if (ball.heldOnPaddle) { ball.heldOnPaddle = false; ball.speedY = 3; }
+            ball.earlyMissed = true; 
+            dropHeldBall(); // 투하 시 꼬리 완전 파괴
+            activeHoldTail = null; 
         }
 
-        if (activeHoldTail.farY > canvas.height + 50 ||
-            ((activeHoldTail.released || activeHoldTail.missed) && activeHoldTail.farY >= JUDGE_LINE_Y)) {
-            activeHoldTail = null;
+        if (activeHoldTail) {
+            if (activeHoldTail.farY > canvas.height + 50 ||
+                ((activeHoldTail.released || activeHoldTail.missed) && activeHoldTail.farY >= JUDGE_LINE_Y)) {
+                activeHoldTail = null;
+            }
         }
     }
 
-    // 연타 물리 및 대기 검사
     if (activeMashTail) {
         let isTailActive = false;
         let step = activeMashTail.speed;
@@ -456,7 +460,6 @@ updatePhysics = () => {
         if (!isTailActive) activeMashTail = null;
     }
 
-    // [버그 수정 2] 공 이동 좌표 계산 전 X값 기억
     let prevBallX = ball.x;
 
     if (ball.attached || ball.heldOnPaddle) {
@@ -472,7 +475,6 @@ updatePhysics = () => {
         ball.y += ball.speedY;
     }
 
-    // [버그 수정 3] 대가리가 패들에 잡혀 이동할 때 꼬리들도 동기화해서 X축 이동
     let dx = ball.x - prevBallX;
     if (ball.heldOnPaddle && dx !== 0) {
         if (activeHoldTail) {
@@ -756,7 +758,6 @@ render = () => {
             let lead = tailBackPoint(far.x, far.y, activeMashTail.backX, activeMashTail.backY, 10);
             context.beginPath();
             context.moveTo(lead.x, lead.y);
-            // [버그 수정 4] 대가리가 고정되어 있으면 연타 꼬리 선이 공 위치까지 완전히 이어지게 함
             if (ball.heldOnPaddle) {
                 context.lineTo(ball.x, JUDGE_LINE_Y);
             } else {
@@ -791,6 +792,20 @@ render = () => {
         let dir = getBallTailDir();
         let color = ball.type === 'hold' ? '#ffff00' : '#ff00ff';
         drawExtrudeTail(ball.x, ball.y, displayLen, dir.x, dir.y, color);
+
+        if (ball.type === 'mash' && displayLen > 0) {
+            let spacing = ball.tailLength / MASH_MARKER_COUNT;
+            for (let i = 1; i <= MASH_MARKER_COUNT; i++) {
+                let dist = spacing * i;
+                if (dist <= displayLen) {
+                    let p = tailBackPoint(ball.x, ball.y, dir.x, dir.y, dist);
+                    context.beginPath();
+                    context.arc(p.x, p.y, ball.radius, 0, Math.PI * 2);
+                    context.fillStyle = '#ffffff';
+                    context.fill();
+                }
+            }
+        }
     }
 
     context.beginPath();
