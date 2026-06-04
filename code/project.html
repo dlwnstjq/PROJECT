@@ -4,45 +4,12 @@
     <meta charset="UTF-8">
     <title>리듬 벽돌깨기</title>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400..900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css">
-    <script src="script.js" defer></script>
+    <link rel="stylesheet" href="new.css">
+    <script src="new.js"></script>
 </head>
-<body class="theme-default">
+<body>
 
     <div class="scanline-filter"></div>
-
-    <!-- 상단 컨트롤 패널: 시작 버튼 + 난이도/환경 설정 -->
-    <div class="top-panel">
-        <div class="control-panel">
-            <button id="btn-start">START</button>
-
-            <label>
-                난이도
-                <select id="sel-difficulty">
-                    <option value="easy">EASY</option>
-                    <option value="normal" selected>NORMAL</option>
-                    <option value="hard">HARD</option>
-                </select>
-            </label>
-
-            <label>
-                배경
-                <select id="sel-background">
-                    <option value="default" selected>DEFAULT</option>
-                    <option value="dark">DARK</option>
-                    <option value="neon">NEON</option>
-                </select>
-            </label>
-
-            <label>
-                공 스킨
-                <select id="sel-ball">
-                    <option value="cyan" selected>CYAN</option>
-                    <option value="white">WHITE</option>
-                </select>
-            </label>
-        </div>
-    </div>
 
     <div class="container">
         <div class="hp-guage-slot">
@@ -62,5 +29,34 @@
             <div class="combo-box">0<span>COMBO</span></div>
         </div>
     </div>
+
+    <div class="dev-console">
+        <div class="dev-group">
+            <span class="dev-title">[ API: NOTE DESIGN ]</span>
+            <button onclick="uiSetNoteState('normal')" style="border-color: #00ffff; color: #00ffff;">NORMAL</button>
+            <button onclick="uiSetNoteState('hold', 160)" style="border-color: #ffff00; color: #ffff00;">HOLD</button>
+            <button onclick="uiSetNoteState('mash', 180)" style="border-color: #ff00ff; color: #ff00ff;">MASH</button>
+            <button onclick="uiSetNoteState('fake')" style="border-color: #b026ff; color: #b026ff;">FAKE</button>
+        </div>
+        <div class="dev-group">
+            <span class="dev-title">[ SIMULATE: LOGIC EVENT ]</span>
+            <button onclick="simulateHit('perfect')">Trigger: PERFECT</button>
+            <button onclick="simulateHit('good')">Trigger: GOOD</button>
+            <button onclick="simulateHit('miss')">Trigger: MISS</button>
+        </div>
+        <div class="dev-group">
+            <span class="dev-title">[ API: PADDLE ]</span>
+            <button onmousedown="uiSetPaddleActive(true)" onmouseup="uiSetPaddleActive(false)">PADDLE (Hold)</button>
+        </div>
+    </div>
+
+    <script>
+        // 디버그 콘솔 시뮬레이터 버튼이 실제 인게임 코어 데이터와 연동되도록 바인딩
+        function simulateHit(judgement) {
+            if (typeof window.triggerSimulatedJudge === 'function') {
+                window.triggerSimulatedJudge(judgement);
+            }
+        }
+    </script>
 </body>
 </html>
