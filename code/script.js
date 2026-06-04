@@ -25,6 +25,7 @@ const NORMAL_MISS_HP = 20;
 const MASH_MISS_HP = 12;
 const MASH_MARKER_COUNT = 3;
 const TAIL_EXTRUDE_SPEED = 6;
+const MAX_RADIUS = 45;
 
 const BRICK_W = 52;
 const BRICK_H = 22;
@@ -33,27 +34,27 @@ const BRICK_ROW_Y = 100;
 
 let bricks = [];
 
-function getTravelDir(vx, vy) {
+const getTravelDir = (vx, vy) => {
     let len = Math.hypot(vx, vy);
     if (len < 0.01) return { x: 0, y: 1 };
     return { x: vx / len, y: vy / len };
-}
+};
 
-function getTailBackDir(vx, vy) {
+const getTailBackDir = (vx, vy) => {
     let t = getTravelDir(vx, vy);
     return { x: -t.x, y: -t.y };
-}
+};
 
-function tailBackPoint(headX, headY, backX, backY, length) {
+const tailBackPoint = (headX, headY, backX, backY, length) => {
     return { x: headX + backX * length, y: headY + backY * length };
-}
+};
 
-function syncTailGrowDirection() {
+const syncTailGrowDirection = () => {
     if (!tailGrow || ball.attached) return;
     let back = getTailBackDir(ball.speedX, ball.speedY);
     tailGrow.dirX = back.x;
     tailGrow.dirY = back.y;
-}
+};
 
 let keyLeft = false;
 let keyRight = false;
@@ -66,6 +67,41 @@ let tailGrow = null;
 // 분리되어 패들로 흡수되는 롱/연타 꼬리
 let activeHoldTail = null;
 let activeMashTail = null;
+
+// 함수 표현식은 호이스팅이 되지 않으므로 아래에서 사용되는 함수들을 미리 선언합니다.
+let gameOnSpecialBrickHit;
+let uiUpdateHealth;
+let uiUpdateScoreAndCombo;
+let initTestBricks;
+let render;
+let initInputListeners;
+let tryMashMarkerHit;
+let launchBallFromPaddle;
+let bounceBall;
+let processJudgement;
+let uiHitParticle;
+let startHoldTailFromBall;
+let startMashTailFromBall;
+let uiSetPaddleActive;
+let tryHoldTailRelease;
+let isSpecialStateBusy;
+let queueSpecialNote;
+let activatePendingSpecial;
+let getBallTailDisplayLength;
+let updateTailGrow;
+let captureTailMotion;
+let getMashMarkerInWindow;
+let updatePhysics;
+let checkBallBrickCollisions;
+let uiShowJudgement;
+let uiSetNoteState;
+let animJudge;
+let animCombo;
+let animDamage;
+let drawBricks;
+let drawExtrudeTail;
+let getBallTailDir;
+let drawPaddle;
 
 document.addEventListener('DOMContentLoaded', () => {
     canvas = document.querySelector('.canvas');
@@ -87,7 +123,7 @@ document.addEventListener('DOMContentLoaded', () => {
     render();
 });
 
-function initTestBricks() {
+initTestBricks = () => {
     const types = ['normal', 'hold', 'mash', 'normal'];
     const tailByType = { hold: 140, mash: 150 };
     const count = types.length;
@@ -103,9 +139,9 @@ function initTestBricks() {
         tailLength: tailByType[type] || 0,
         alive: true
     }));
-}
+};
 
-function initInputListeners() {
+initInputListeners = () => {
     window.addEventListener('keydown', (e) => {
         if (e.code === 'ArrowLeft') keyLeft = true;
         if (e.code === 'ArrowRight') keyRight = true;
@@ -158,26 +194,26 @@ function initInputListeners() {
             tryHoldTailRelease();
         }
     });
-}
+};
 
-function isSpecialStateBusy() {
+isSpecialStateBusy = () => {
     return ball.specialLocked || pendingSpecial || activeHoldTail || activeMashTail;
-}
+};
 
 /** 다른 팀: 특수 브릭 충돌 시 호출. 이미 특수 상태면 무시 */
-function gameOnSpecialBrickHit(type, tailLength = 160) {
+gameOnSpecialBrickHit = (type, tailLength = 160) => {
     if (type !== 'hold' && type !== 'mash') return false;
     if (isSpecialStateBusy()) return false;
     pendingSpecial = { type, tailLength };
     return true;
-}
+};
 
-function queueSpecialNote(type, tailLength) {
+queueSpecialNote = (type, tailLength) => {
     if (isSpecialStateBusy()) return;
     pendingSpecial = { type, tailLength };
-}
+};
 
-function activatePendingSpecial() {
+activatePendingSpecial = () => {
     if (!pendingSpecial || ball.y < EFFECT_SPAWN_Y) return;
 
     ball.type = pendingSpecial.type;
@@ -193,28 +229,28 @@ function activatePendingSpecial() {
         originY: ball.y
     };
     pendingSpecial = null;
-}
+};
 
-function getBallTailDisplayLength() {
+getBallTailDisplayLength = () => {
     if (tailGrow) return tailGrow.current;
     if (ball.type === 'hold' || ball.type === 'mash') return ball.tailLength;
     return 0;
-}
+};
 
-function updateTailGrow() {
+updateTailGrow = () => {
     if (!tailGrow || tailGrow.current >= tailGrow.length) return;
     syncTailGrowDirection();
     tailGrow.current = Math.min(tailGrow.length, tailGrow.current + TAIL_EXTRUDE_SPEED);
-}
+};
 
-function captureTailMotion(vx, vy) {
+captureTailMotion = (vx, vy) => {
     let travel = getTravelDir(vx, vy);
     let back = getTailBackDir(vx, vy);
     let speed = Math.hypot(vx, vy) || 3;
     return { moveX: travel.x, moveY: travel.y, backX: back.x, backY: back.y, speed };
-}
+};
 
-function startHoldTailFromBall() {
+startHoldTailFromBall = () => {
     let tailLen = getBallTailDisplayLength() || ball.tailLength;
     let motion = captureTailMotion(ball.speedX, ball.speedY);
     let far = tailBackPoint(ball.x, ball.y, motion.backX, motion.backY, tailLen);
@@ -233,9 +269,9 @@ function startHoldTailFromBall() {
         releaseWindow: false,
         absorbing: false
     };
-}
+};
 
-function startMashTailFromBall() {
+startMashTailFromBall = () => {
     let tailLen = getBallTailDisplayLength() || ball.tailLength;
     let motion = captureTailMotion(ball.speedX, ball.speedY);
     let spacing = tailLen / MASH_MARKER_COUNT;
@@ -254,9 +290,9 @@ function startMashTailFromBall() {
         speed: motion.speed,
         markers
     };
-}
+};
 
-function getMashMarkerInWindow() {
+getMashMarkerInWindow = () => {
     if (!activeMashTail) return null;
 
     let inWindow = activeMashTail.markers.filter(m => {
@@ -267,9 +303,9 @@ function getMashMarkerInWindow() {
     if (inWindow.length === 0) return null;
 
     return inWindow.reduce((best, m) => (m.y > best.y ? m : best));
-}
+};
 
-function tryMashMarkerHit() {
+tryMashMarkerHit = () => {
     let targetMarker = getMashMarkerInWindow();
     if (!targetMarker) return false;
 
@@ -279,9 +315,9 @@ function tryMashMarkerHit() {
     uiHitParticle(targetMarker.x, JUDGE_LINE_Y);
     targetMarker.state = 'hit';
     return true;
-}
+};
 
-function tryHoldTailRelease() {
+tryHoldTailRelease = () => {
     if (!activeHoldTail || activeHoldTail.missed || activeHoldTail.released) return;
 
     if (!activeHoldTail.releaseWindow) {
@@ -295,17 +331,17 @@ function tryHoldTailRelease() {
     processJudgement(judge);
     if (judge !== 'miss') uiHitParticle(activeHoldTail.farX, JUDGE_LINE_Y);
     activeHoldTail.released = true;
-}
+};
 
-function launchBallFromPaddle() {
+launchBallFromPaddle = () => {
     ball.attached = false;
     ball.x = paddle.x + paddle.width / 2;
     ball.y = paddle.y - ball.radius - 2;
     ball.speedX = 0;
     ball.speedY = -5;
-}
+};
 
-function bounceBall() {
+bounceBall = () => {
     ball.attached = false;
     ball.speedY = -4;
     let hitPoint = (ball.x - (paddle.x + paddle.width / 2)) / (paddle.width / 2);
@@ -314,9 +350,9 @@ function bounceBall() {
     ball.tailLength = 0;
     ball.specialLocked = false;
     tailGrow = null;
-}
+};
 
-function processJudgement(type, options = {}) {
+processJudgement = (type, options = {}) => {
     if (type === 'perfect') {
         score += 100 + (combo * 10);
         combo++;
@@ -333,9 +369,9 @@ function processJudgement(type, options = {}) {
     uiUpdateScoreAndCombo(score, combo);
     uiUpdateHealth(hp);
     uiShowJudgement(type);
-}
+};
 
-function updatePhysics() {
+updatePhysics = () => {
     if (keyLeft) paddle.x -= 6;
     if (keyRight) paddle.x += 6;
     if (paddle.x < 0) paddle.x = 0;
@@ -343,9 +379,6 @@ function updatePhysics() {
 
     activatePendingSpecial();
     updateTailGrow();
-
-    // [버그 수정] 주석 처리: 연타 노트 자동 판정 루틴 제거 (수동 입력만 인정)
-    // if (keyPaddleHeld && activeMashTail) tryMashMarkerHit();
 
     if (activeHoldTail) {
         let step = activeHoldTail.speed;
@@ -383,7 +416,6 @@ function updatePhysics() {
             activeHoldTail.missed = true;
         }
 
-        // [버그 수정] 흡수 완료(라인 통과) 시 꼬리가 더 밑으로 내려가지 않고 즉시 정리되도록 판정 조건 수정
         if (activeHoldTail.farY > canvas.height + 50 ||
             ((activeHoldTail.released || activeHoldTail.missed) && activeHoldTail.farY >= JUDGE_LINE_Y)) {
             activeHoldTail = null;
@@ -440,10 +472,10 @@ function updatePhysics() {
         activeHoldTail = null;
         activeMashTail = null;
     }
-}
+};
 
 // [버그 수정] 전방위(상하좌우) 벽돌 충돌 처리 알고리즘 적용
-function checkBallBrickCollisions() {
+checkBallBrickCollisions = () => {
     for (let brick of bricks) {
         if (!brick.alive) continue;
         
@@ -481,10 +513,10 @@ function checkBallBrickCollisions() {
         }
         return; // 한 프레임에 벽돌 1개만 처리
     }
-}
+};
 
 /* ========== API 목록 ========== */
-function uiUpdateHealth(hpValue) {
+uiUpdateHealth = (hpValue) => {
     hp = hpValue;
     if (!healthFill) return;
     healthFill.style.height = hp + "%";
@@ -502,9 +534,9 @@ function uiUpdateHealth(hpValue) {
         playScreen.style.borderColor = "#00ffff"; 
         playScreen.style.boxShadow = "inset 0 0 40px rgba(0, 255, 255, 0.15)";
     }
-}
+};
 
-function uiUpdateScoreAndCombo(scoreValue, comboValue) {
+uiUpdateScoreAndCombo = (scoreValue, comboValue) => {
     score = scoreValue;
     combo = comboValue;
     let scoreStr = score.toString();
@@ -518,9 +550,9 @@ function uiUpdateScoreAndCombo(scoreValue, comboValue) {
     } else { 
         comboBox.style.opacity = "0"; 
     }
-}
+};
 
-function uiShowJudgement(judgeType) {
+uiShowJudgement = (judgeType) => {
     if (judgeType == 'miss') {
         animDamage();
         animJudge("MISS", "miss");
@@ -531,13 +563,13 @@ function uiShowJudgement(judgeType) {
     } else {
         animJudge(judgeType, "perfect");
     }
-}
+};
 
-function uiHitParticle(x, y) {
+uiHitParticle = (x, y) => {
     effects.push({ x: x, y: y, radius: 10, alpha: 1 });
-}
+};
 
-function uiSetNoteState(type, tailLength = 0) {
+uiSetNoteState = (type, tailLength = 0) => {
     ball.attached = true;
     ball.speedX = 0;
     ball.speedY = 0;
@@ -555,15 +587,15 @@ function uiSetNoteState(type, tailLength = 0) {
         ball.type = type;
         ball.tailLength = tailLength;
     }
-}
+};
 
-function uiSetPaddleActive(isActive) {
+uiSetPaddleActive = (isActive) => {
     paddle.isPressed = isActive;
-}
+};
 
 /* ========== 내부 애니메이션 루틴 ========== */
 let judgeTimer = null; 
-function animJudge(text, judgeType) {
+animJudge = (text, judgeType) => {
     judgementDisplay.textContent = text;
     judgementDisplay.classList.remove('judge-perfect', 'judge-good', 'judge-miss');
     judgementDisplay.classList.add(`judge-${judgeType}`);
@@ -589,10 +621,10 @@ function animJudge(text, judgeType) {
             clearInterval(judgeTimer);
         }
     }, 16);
-}
+};
 
 let comboTimer = null;
-function animCombo() {
+animCombo = () => {
     const targetSize = 45;
     let currentSize = targetSize + 12;
     comboBox.style.color = "#ffffff";
@@ -607,18 +639,18 @@ function animCombo() {
         }
         comboBox.style.fontSize = currentSize + "px";
     }, 16);
-}
+};
 
 let damageTimer = null;
-function animDamage() {
+animDamage = () => {
     if (damageTimer) clearTimeout(damageTimer);
     healthFill.style.background = "#ffffff";
     healthFill.style.boxShadow = "0 0 40px #ffffff, inset 0 0 20px #ffffff";
     damageTimer = setTimeout(() => { uiUpdateHealth(hp); }, 100);
-}
+};
 
 /* ========== 렌더 루프 ========== */
-function drawBricks() {
+drawBricks = () => {
     bricks.forEach(brick => {
         if (!brick.alive) return;
         context.fillStyle = '#1a1a22';
@@ -633,9 +665,9 @@ function drawBricks() {
             context.fillText(brick.type === 'hold' ? 'L' : 'M', brick.x + brick.w / 2 - 4, brick.y + 15);
         }
     });
-}
+};
 
-function drawExtrudeTail(headX, headY, length, dirX, dirY, color) {
+drawExtrudeTail = (headX, headY, length, dirX, dirY, color) => {
     if (length <= 0) return;
     let end = tailBackPoint(headX, headY, dirX, dirY, length);
     context.beginPath();
@@ -645,14 +677,14 @@ function drawExtrudeTail(headX, headY, length, dirX, dirY, color) {
     context.lineCap = 'round';
     context.strokeStyle = color;
     context.stroke();
-}
+};
 
-function getBallTailDir() {
+getBallTailDir = () => {
     if (tailGrow) return { x: tailGrow.dirX, y: tailGrow.dirY };
     return getTailBackDir(ball.speedX, ball.speedY);
-}
+};
 
-function render() {
+render = () => {
     context.clearRect(0, 0, canvas.width, canvas.height);
     updatePhysics();
     drawBricks();
@@ -742,9 +774,9 @@ function render() {
     });
 
     requestAnimationFrame(render);
-}
+};
 
-function drawPaddle() {
+drawPaddle = () => {
     context.beginPath(); 
     context.moveTo(0, paddle.y); 
     context.lineTo(canvas.width, paddle.y);
@@ -766,4 +798,55 @@ function drawPaddle() {
     context.lineWidth = 2; 
     context.strokeStyle = paddle.isPressed ? '#00ffff' : '#ffffff'; 
     context.strokeRect(paddle.x, paddle.y - (paddle.height / 2), paddle.width, paddle.height);
+};
+
+let approachTracker = {
+    lastY: ball.y,
+    isDescending: false
+};
+
+function drawApproachCircle() {
+    if (!ball || !paddle) return;
+
+    if (ball.y > approachTracker.lastY) {
+        approachTracker.isDescending = true;
+    } else if (ball.y < approachTracker.lastY) {
+        approachTracker.isDescending = false;
+    }
+    approachTracker.lastY = ball.y;
+
+    if (!approachTracker.isDescending || ball.y < EFFECT_SPAWN_Y || ball.y >= paddle.y) {
+        return;
+    }
+
+    // 2. 지정된 '이펙트 생성선'부터 패들까지의 전체 거리 계산
+    let totalDistance = paddle.y - EFFECT_SPAWN_Y;
+    
+    // 패들까지 남은 거리
+    let currentDistance = paddle.y - ball.y;
+
+    if (totalDistance <= 0 || currentDistance <= 0) return;
+
+    // 남은 거리 비율 (생성선 위치에서는 1.0 -> 패들에 도달하면 0.0)
+    let ratio = currentDistance / totalDistance;
+
+    // 3. 비율에 따라 반지름 계산 (패들에 딱 도달해 ratio가 0이 되면 정확히 ball.radius와 완벽 일치)
+    let currentRadius = ball.radius + (MAX_RADIUS - ball.radius) * ratio;
+
+    // 수축 원 그리기
+    context.beginPath();
+    context.arc(ball.x, ball.y, currentRadius, 0, Math.PI * 2);
+    context.lineWidth = 1.5;
+    
+    // 내려오는 타이밍을 명확히 볼 수 있도록 선명한 네온 컬러 지정
+    context.strokeStyle = `rgba(0, 255, 255, ${0.3 + (1 - ratio) * 0.5})`;
+    context.stroke();
 }
+
+// 4. 원본 코드를 수정하지 않고 render 루프에 가로채기(Hooking)로 결합
+const originalRender = render;
+
+render = function() {
+    originalRender();      // 원본 render() 실행 (공, 패들, 기존 이펙트 그리기)
+    drawApproachCircle();  // 그 위에 설정한 생성선 기준 수축 원 덮어쓰기
+};
