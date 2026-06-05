@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>리듬 벽돌깨기</title>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400..900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style1.css">
+    <script src="script1.js"></script>
+</head>
+<body>
+
+    <div class="container">
+        <div class="hp-guage-slot">
+            <div class="hp-gauge-fill"></div>
+        </div>
+        <div class="play-screen">
+            <canvas class="canvas" width="500" height="600"></canvas>
+            <div class="judgement-text"></div>
+        </div>
+        <div class="panel">
+            <div class="info-label">SCORE</div>
+            <div class="score-box">000000</div>
+            
+            <div class="info-label">STAGE</div>
+            <div class="stage-box">01</div>
+            
+            <div class="combo-box">0<span>COMBO</span></div>
+
+        </div>
+    </div>
+
+    <div class="dev-console">
+        <div class="dev-group">
+            <span class="dev-title">[ API: NOTE DESIGN ]</span>
+            <button onclick="uiSetNoteState('normal')" style="border-color: #00ffff; color: #00ffff;">NORMAL</button>
+            <button onclick="uiSetNoteState('hold', 160)" style="border-color: #ffff00; color: #ffff00;">HOLD</button>
+            <button onclick="uiSetNoteState('mash', 180)" style="border-color: #ff00ff; color: #ff00ff;">MASH</button>
+            <button onclick="uiSetNoteState('fake')" style="border-color: #b026ff; color: #b026ff;">FAKE</button>
+        </div>
+        <div class="dev-group">
+            <span class="dev-title">[ SIMULATE: LOGIC EVENT ]</span>
+            <button onclick="simulateHit('perfect')">Trigger: PERFECT</button>
+            <button onclick="simulateHit('good')">Trigger: GOOD</button>
+            <button onclick="simulateHit('miss')">Trigger: MISS</button>
+        </div>
+        <div class="dev-group">
+            <span class="dev-title">[ API: PADDLE ]</span>
+            <button onmousedown="uiSetPaddleActive(true)" onmouseup="uiSetPaddleActive(false)">PADDLE (Hold)</button>
+        </div>
+    </div>
+
+    <script>
+        // 디버그 콘솔 시뮬레이터 버튼이 실제 인게임 코어 데이터와 연동되도록 바인딩
+        function simulateHit(judgement) {
+            if (typeof window.triggerSimulatedJudge === 'function') {
+                window.triggerSimulatedJudge(judgement);
+            }
+        }
+    </script>
+</body>
+</html>
