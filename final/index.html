@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>리듬스타 Break Out!</title>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:ital,wght@0,500;0,700;0,900;1,700;1,900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="crt-overlay"></div>
+
+<div class="start-screen" id="startScreen">
+    <img src="logo.png" alt="Logo" class="logo">
+    <div class="press-any-key">[Press any key]</div>
+</div>
+
+<div class="main-menu" id="mainMenu">
+    <div class="slide-container" id="slideContainer">
+        <div class="slide slide-play">
+            <div class="circle-btn-wrapper">
+                <div class="circle-btn" id="btnPlay"><canvas width="340" height="340"></canvas><div class="circle-btn-inner"><div class="circle-btn-text">GAME<br>PLAY</div></div></div>
+            </div>
+        </div>
+        <div class="slide slide-story">
+            <div class="circle-btn-wrapper">
+                <div class="circle-btn" id="btnStory"><canvas width="340" height="340"></canvas><div class="circle-btn-inner"><div class="circle-btn-text">STORY</div></div></div>
+            </div>
+        </div>
+        <div class="slide slide-option">
+            <div class="circle-btn-wrapper">
+                <div class="circle-btn" id="btnOption"><canvas width="340" height="340"></canvas><div class="circle-btn-inner"><div class="circle-btn-text">SETTING</div></div></div>
+            </div>
+        </div>
+    </div>
+    <div class="nav-arrow nav-left" id="navLeft">
+        <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"></polyline></svg>
+    </div>
+    <div class="nav-arrow nav-right" id="navRight">
+        <svg viewBox="0 0 24 24"><polyline points="9 6 15 12 9 18"></polyline></svg>
+    </div>
+</div>
+
+<div class="entry-anim" id="entryAnim">
+    <canvas id="entryCanvas" width="600" height="600"></canvas>
+    <div class="entry-count" id="entryCount">3</div>
+</div>
+
+<div class="song-select" id="songSelect">
+    <div class="lobby-wrapper">
+        <div class="info-section">
+            <div class="album-art-wrapper" id="ssAlbum"></div>
+            
+            <div class="track-details">
+                <h1 class="track-title" id="trackTitle">MUSIC SELECT</h1>
+                <p class="track-artist" id="trackArtist">Choose Your Track</p>
+                <div class="track-bpm">
+                    BEST SCORE <span id="ssBestScore" style="color:#00ffff; margin-right:15px;">0</span>
+                    MAX COMBO <span id="ssBestCombo" style="color:#ff00ff;">0</span>
+                </div>
+            </div>
+
+            <div class="difficulty-switch">
+                <span class="diff-btn" id="diffLeft" style="font-size: 18px; padding: 8px 15px;">&#9664;</span>
+                <span class="diff-btn active normal" id="diffText">NORMAL</span>
+                <span class="diff-btn" id="diffRight" style="font-size: 18px; padding: 8px 15px;">&#9654;</span>
+            </div>
+
+            <button class="start-btn" onclick="startGame()">START GAME</button>
+            <button class="start-btn back-btn" onclick="closeSongSelect()">BACK TO MENU</button>
+        </div>
+
+        <div class="list-section">
+            <div class="track-list" id="ssList"></div>
+        </div>
+    </div>
+</div>
+
+<div class="story-modal" id="storyModal">
+    <div class="story-box">
+        <span class="story-close" id="storyClose">&#10005;</span>
+        <h2>STORY</h2>
+        <p>Dr. R의 오랜 연구 끝에 음악은 새로운 에너지원이 되어, 세상을 다시 풍요롭게 해주었다. 영원할 것만 같았던 이 풍요함은 의외의 곳에서 위기가 닥쳐오게 된다.</p>
+        <br>
+        <p>지구에 인간의 감정을 통제하고 세뇌하는 슈퍼컴퓨터 Party가 로봇군단을 이끌고 찾아와 음악을 파괴하려고 시도한다.</p>
+        <br>
+        <p>Dr. R은 Party가 찾지 못할 만한 곳에 음악을 미리 숨겨두었다. 그곳은 다름 아닌 오래된 벽돌 깨기 게임!</p>
+        <br>
+        <p>당신은 의식 같은 리듬 게임에서 부딪히며 음악을 다시 완성해 로봇군단과 Party로부터 세상을 지켜내고자 한다.</p>
+    </div>
+</div>
+
+<div class="song-intro" id="songIntro">
+    <div class="si-bg" id="siBg"></div>
+    <div class="si-overlay"></div>
+    <div class="si-content">
+        <div class="si-bar">
+            <div class="si-title" id="siTitle">SPY OUT2</div>
+        </div>
+        <div class="si-sub-bar">
+            <div class="si-mode" id="siMode">MODE NORMAL</div>
+        </div>
+    </div>
+</div>
+
+<div class="option-screen" id="optionScreen">
+    <h2>SETTINGS</h2>
+    <div class="option-group"><label>THEME</label><select id="themeSelect" onchange="setTheme(this.value)"><option value="cyber">CYBER</option><option value="classic">CLASSIC</option></select></div>
+    <div class="option-group"><label>BGM VOLUME</label><input type="range" id="volBgm" min="0" max="100" value="40" oninput="setBgmVolume(this.value)"></div>
+    <div class="option-group"><label>SFX VOLUME</label><input type="range" id="volSfx" min="0" max="100" value="80" oninput="setSfxVolume(this.value)"></div>
+    <div class="option-group"><label>BRIGHTNESS</label><input type="range" id="volBright" min="30" max="100" value="100" oninput="setBrightness(this.value)"></div>
+    <div class="option-group"><label>PADDLE SPEED</label><input type="range" id="volPaddle" min="3" max="15" value="7" oninput="setPaddleSpeed(this.value)"><span id="paddleSpeedVal" style="color:#00ffff;font-size:12px;margin-left:6px;">7</span></div>
+    <div class="option-group"><label>TIMING GUIDE</label><div style="display:flex;gap:8px;"><button class="ctrl-btn active" id="guideOn" onclick="setTimingGuide(true)">ON</button><button class="ctrl-btn" id="guideOff" onclick="setTimingGuide(false)">OFF</button></div></div>
+    <div class="option-back" id="optionBack">&#8592; BACK</div>
+</div>
+
+<div class="game-screen" id="gameScreen">
+    <div class="game-bg-blur" id="gameBgFilter"></div>
+    <div class="game-container">
+        <div class="hp-guage-slot">
+            <div class="hp-gauge-fill"></div>
+        </div>
+        <div class="play-screen">
+            <canvas class="canvas" width="500" height="600"></canvas>
+            <div class="judgement-text"></div>
+        </div>
+        <div class="panel">
+            <div class="info-label">SCORE</div>
+            <div class="score-box">000000</div>
+            <div class="info-label">STAGE</div>
+            <div class="stage-box" id="stageBox">01</div>
+            <div class="combo-box">0<span>COMBO</span></div>
+        </div>
+    </div>
+
+    <div id="pauseOverlay">
+        <div class="pause-title">P A U S E D</div>
+        <button class="pause-btn" id="btnResume">&#9654; RESUME</button>
+        <button class="pause-btn" id="btnRestart">&#8634; RESTART</button>
+        <button class="pause-btn" id="btnExitSong">&#9835; MUSIC SELECT</button>
+        <button class="pause-btn" id="btnExitLobby">&#9664; MAIN MENU</button>
+        <div style="margin-top:16px;background:#0d0d12;border:1px solid #333;border-radius:8px;padding:14px 24px;display:flex;flex-direction:column;align-items:center;gap:8px;min-width:220px;">
+            <div style="font-size:10px;color:#00ffff;letter-spacing:3px;">BGM</div>
+            <input type="range" min="0" max="100" value="40" style="width:100%;" id="pauseVolBgm">
+            <div style="font-size:10px;color:#00ffff;letter-spacing:3px;">SFX</div>
+            <input type="range" min="0" max="100" value="80" style="width:100%;" id="pauseVolSfx">
+        </div>
+    </div>
+</div>
+    <div class="result-overlay">
+        <div class="result-container">
+            <div class="result-header">
+                <h2 class="gameresult"></h2>
+                <p id="resultSongInfo">— NORMAL</p>
+            </div>
+            <div class="result-body">
+                <div class="rank-display">
+                    <div class="rank-letter rank-s" id="resultRankLetter">S</div>
+                </div>
+                <div class="stats-display">
+                    <div class="stat-row">
+                        <span class="stat-label">SCORE</span>
+                        <span class="stat-value" id="result-score">0</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">MAX COMBO</span>
+                        <span class="stat-value" id="result-maxcombo">0</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">ACCURACY</span>
+                        <span class="stat-value" id="result-accuracy">0%</span>
+                    </div>
+                </div>
+            </div>
+            <div class="result-actions">
+                <button class="action-btn" id="resultRetryBtn" tabindex="-1" onclick="retryGame()">RETRY</button>
+                <button class="action-btn next-btn" id="resultNextBtn" tabindex="-1" onclick="goToNext()" style="display:none;">NEXT ▶</button>
+                <button class="action-btn next-btn" tabindex="-1" onclick="goToSelect()">MUSIC SELECT</button>
+                <button class="action-btn" tabindex="-1" onclick="goToLobby()">MAIN MENU</button>
+            </div>
+        </div>
+    </div>
+
+    <audio id="gameBgm" preload="auto"></audio>
+    <audio id="clearAudio" preload="auto"><source src="clear.mp3" type="audio/mpeg"></audio>
+</div>
+
+<script src="js/game.js"></script>
+
+<audio id="bgmLobby" loop preload="auto"><source src="lobby.mp3" type="audio/mpeg"></audio>
+<audio id="sfxShift" preload="auto"><source src="shift.wav" type="audio/wav"></audio>
+<audio id="bgmSelect" preload="auto"><source src="select.mp3" type="audio/mpeg"></audio>
+
+</body>
+</html>
